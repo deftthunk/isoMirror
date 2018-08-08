@@ -1,15 +1,22 @@
 #!/usr/bin/python3
 
+#
+# Build Debian apt mirror directory out of Debian ISO images.
+#
+# Use: isoMirror ISOFILE [ISOFILE2]... TARGET_DIR
+#
+
 import io, sys, os, re
 import subprocess
 import tempfile
 import pathlib
+import distutils.dir_util
 
 
-def checkUser():
-    if(os.getuid() != 0):
-        print("Run as root")
-        sys.exit()
+#def checkUser():
+#    if(os.getuid() != 0):
+#        print("Run as root")
+#        sys.exit()
 
 
 def getInput():
@@ -32,9 +39,13 @@ def mount(images):
     mountDirs = []
     for iso in images:
         dp = tempfile.TemporaryDirectory()
-        status = subprocess.run(["mount", "-v", "-o", "ro", iso, dp.name])
+        status = subprocess.run(["sudo", "-S", "mount", "-v", "-o", "ro", \
+                iso, dp.name])
+        print("Mounting", iso, "on", dp.name)
         if status.returncode != 0:
             print("Mount failed:", status.returncode, dp.name)
+            dp.close()
+            cleanup(mountDirs)
             sys.exit()
 
         mountDirs.append(dp)
@@ -62,21 +73,27 @@ def getDebianVersion(mountDirs):
     return version
 
 
+# Builds path to write ISO image data to and overwrites empty folder
+# if exists. 
 def rsync(mountDirs, targetDir, debVersion):
     writePath = ''.join([targetDir, debVersion, "/debian"])
     print("Creating", writePath)
     pathlib.Path(writePath).mkdir(parents=True, exist_ok=True)
     
     for image in mountDirs:
-        statusDists = subprocess.run(["rsync", "-av", image.name + \
+        statusCopyDists = subprocess.run(["rsync", "-av", image.name + \
                 "/dists", writePath])
-        statusPool = subprocess.run(["rsync", "-av", image.name + \
+        statusCopyPool = subprocess.run(["rsync", "-av", image.name + \
                 "/pool", writePath])
 
-        if statusDists.returncode != 0:
-            print("Rsync failed:", statusDists.returncode)
-        if statusPool.returncode != 0:
-            print("Rsync failed:", statusPool.returncode)
+        if statusCopyDists.returncode != 0:
+            print("Rsync failed:", statusCopyDists.returncode)
+        if statusCopyPool.returncode != 0:
+            print("Rsync failed:", statusCopyPool.returncode)
+        
+
+#def combineRelease(mountDirs, targetDir, debVersion):
+    
 
 
 def cleanup(mountDirs):
@@ -86,7 +103,7 @@ def cleanup(mountDirs):
 
 
 def main():
-    checkUser()
+    #checkUser()
     targetDir, images = getInput()
     mountDirs = mount(images)
     debVersion = getDebianVersion(mountDirs)
