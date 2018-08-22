@@ -13,10 +13,15 @@ import pathlib
 import distutils.dir_util
 
 
-#def checkUser():
-#    if(os.getuid() != 0):
-#        print("Run as root")
-#        sys.exit()
+def checkUser():
+    if(os.getuid() != 0):
+        print("Run as root")
+        sys.exit()
+    else:
+        # attempt to find user name
+        cwd = os.getcwd().split('/')
+        if cwd[0] == 'home':
+            user = cwd[1]
 
 
 def getInput():
