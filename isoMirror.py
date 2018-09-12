@@ -13,6 +13,22 @@ import pathlib
 import distutils.dir_util
 
 
+#class Dists:
+#    def __init__(self, folder):
+#        self.name = folder
+    
+
+#    def binary_amd64():
+        
+
+#    def i18n():
+        
+
+#    def debian_installer():
+ 
+
+
+
 def checkUser():
     if(os.getuid() != 0):
         print("Run as root")
@@ -40,6 +56,7 @@ def getInput():
 
 
 ## generates random mount dirs in /tmp for ISOs and mounts them
+## returns an array of mounted dirs
 def mount(images):
     mountDirs = []
     for iso in images:
@@ -78,27 +95,45 @@ def getDebianVersion(mountDirs):
     return version
 
 
-# Builds path to write ISO image data to and overwrites empty folder
-# if exists. 
-def rsync(mountDirs, targetDir, debVersion):
-    writePath = ''.join([targetDir, debVersion, "/debian"])
-    print("Creating", writePath)
-    pathlib.Path(writePath).mkdir(parents=True, exist_ok=True)
+# Builds path to write ISO image data to and overwrites empty folder if exists
+def buildMirror(mountDirs, targetDir, debVersion):
+    writePathRoot = ''.join([targetDir, debVersion, "/debian"])
+    print("Creating", writePathRoot)
+    pathlib.Path(writePathroot).mkdir(parents=True, exist_ok=True)
     
-    for image in mountDirs:
-        statusCopyDists = subprocess.run(["rsync", "-av", image.name + \
-                "/dists", writePath])
-        statusCopyPool = subprocess.run(["rsync", "-av", image.name + \
-                "/pool", writePath])
-
-        if statusCopyDists.returncode != 0:
-            print("Rsync failed:", statusCopyDists.returncode)
-        if statusCopyPool.returncode != 0:
-            print("Rsync failed:", statusCopyPool.returncode)
+    # create dists objects for ISO file recombination
+#    mainDir = Dists("main")
+#    contribDir = Dists("contrib")
+   
+    # copy pool
+#    for image in mountDirs:
+#        walkPool(image.name + "/pool", writePathRoot)
         
+    # copy dists
+    for image in mountDirs:
+        walkDists(image.name + "/dists", writePathRoot)
 
-#def combineRelease(mountDirs, targetDir, debVersion):
-    
+
+def walkDists(parentDir, writePathRoot):
+    for entry in os.scandir(parentDir):
+        print("Naked: " + entry.name)
+        print("Name: " + entry.path)
+        print("Target: " + writePath)
+        if entry.is_dir() and not entry.is_symlink():
+            walkDists(entry.path, writePathRoot)
+#        elif entry.is_symlink():
+            
+            
+
+def walkPool(parentDir, writePathRoot):
+    for entry in os.scandir(parentDir):
+        print(entry)
+        if entry.is_dir() and not entry.is_symlink():
+            pathlib.path(entry.path).mkdir(parents=True, exist_ok=True)
+            walkPool(entry.path, writePathRoot)
+#        elif entry.is_symlink():
+
+
 
 
 def cleanup(mountDirs):
@@ -112,7 +147,7 @@ def main():
     targetDir, images = getInput()
     mountDirs = mount(images)
     debVersion = getDebianVersion(mountDirs)
-    rsync(mountDirs, targetDir, debVersion)
+    buildMirror(mountDirs, targetDir, debVersion)
 
     cleanup(mountDirs)
 
