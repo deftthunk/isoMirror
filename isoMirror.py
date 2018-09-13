@@ -11,6 +11,8 @@ import subprocess
 import tempfile
 import pathlib
 import distutils.dir_util
+import shutil
+import gzip
 
 
 #class Dists:
@@ -95,34 +97,39 @@ def getDebianVersion(mountDirs):
     return version
 
 
-# Builds path to write ISO image data to and overwrites empty folder if exists
-def buildMirror(mountDirs, targetDir, debVersion):
-    writePathRoot = ''.join([targetDir, debVersion, "/debian"])
-    print("Creating", writePathRoot)
-    pathlib.Path(writePathroot).mkdir(parents=True, exist_ok=True)
+def concatGzip(entry, writePathRoot):
+    tmpFile = ''.join([writePathRoot, '/newtmp'])
+    localFile = ''.join([writePathRoot, '/', entry.name])
     
-    # create dists objects for ISO file recombination
-#    mainDir = Dists("main")
-#    contribDir = Dists("contrib")
-   
-    # copy pool
-#    for image in mountDirs:
-#        walkPool(image.name + "/pool", writePathRoot)
-        
-    # copy dists
-    for image in mountDirs:
-        walkDists(image.name + "/dists", writePathRoot)
+    # open ISO image copy
+    with gzip.open(entry.path, 'rb') as f_tmp:
+        with open(tmpFile, 'ab') as f_new:
+            f_new.write(f_tmp)
+    # open local copy (if exists)
+    if os.path.exists(localFile):
+        with gzip.open(localFile, 'rb') as f_cur:
+            with open(tmpFile, 'ab') as f_new:
+                f_new.write(f_cur)
+    else:
+        shutil.move(tmpFile, localFile)
 
+    
 
 def walkDists(parentDir, writePathRoot):
     for entry in os.scandir(parentDir):
-        print("Naked: " + entry.name)
-        print("Name: " + entry.path)
-        print("Target: " + writePath)
+        print("entry.path: " + entry.path)
+        print("writePathRoot: " + writePathRoot)
         if entry.is_dir() and not entry.is_symlink():
-            walkDists(entry.path, writePathRoot)
-#        elif entry.is_symlink():
-            
+            curTargetPath = ''.join([writePathRoot, '/', entry.name])
+            pathlib.Path(curTargetPath).mkdir(parents=True, exist_ok=True)
+            walkDists(entry.path, curTargetPath)
+            print("leaving")
+        elif entry.is_file():
+            f_name, f_extension = os.path.splitext(entry.name)
+            if f_extension == '.gz':
+                concatGzip(entry, writePathRoot)
+            else:
+                shutil.copy2(entry.path, writePathRoot, follow_symlinks=False)
             
 
 def walkPool(parentDir, writePathRoot):
@@ -132,6 +139,20 @@ def walkPool(parentDir, writePathRoot):
             pathlib.path(entry.path).mkdir(parents=True, exist_ok=True)
             walkPool(entry.path, writePathRoot)
 #        elif entry.is_symlink():
+
+
+
+# Builds path to write ISO image data to and overwrites empty folder if exists
+def buildMirror(mountDirs, targetDir, debVersion):
+    writePathRoot = ''.join([targetDir, debVersion, "/debian"])
+    print("Creating", writePathRoot)
+    pathlib.Path(writePathRoot).mkdir(parents=True, exist_ok=True)
+    
+    # copy dists
+    for image in mountDirs:
+        walkDists(image.name + "/dists", ''.join([writePathRoot, "/dists"]))
+    
+    # make symlink ....
 
 
 
