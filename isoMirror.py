@@ -98,24 +98,40 @@ def getDebianVersion(mountDirs):
 
 
 def concatGzip(entry, writePathRoot):
+    #tmpFile = ''.join([writePathRoot, '/newtmp'])
+    #tmpFile2 = ''.join([writePathRoot, '/newtmp2'])
     tmpFile = ''.join([writePathRoot, '/newtmp'])
     localFile = ''.join([writePathRoot, '/', entry.name])
-    
-    # open ISO image copy
-    with gzip.open(entry.path, 'rb') as f_tmp:
-        with open(tmpFile, 'ab') as f_new:
-            f_new.write(f_tmp)
-    # open local copy (if exists)
-    if os.path.exists(localFile):
-        with gzip.open(localFile, 'rb') as f_cur:
-            with open(tmpFile, 'ab') as f_new:
-                f_new.write(f_cur)
-    else:
-        shutil.move(tmpFile, localFile)
 
+
+    # if gzip file already exists
+    if os.path.exists(localFile):
+        with gzip.GzipFile(localFile, 'rb') as f_cur:
+            with open(tmpFile, 'ab') as f_new:
+                f_new.write(f_cur.read())
+    
+                # open ISO image copy
+                with gzip.GzipFile(entry.path, 'rb') as data:
+                    f_new.write(data.read())
+
+    # create new file
+    else:
+        with gzip.GzipFile(entry.path, 'rb') as data:
+            with open(tmpFile, 'ab') as f_new:
+                f_new.write(data.read())
+
+    # zip up whatever's left
+    with open(tmpFile, 'rb') as f_in:
+        with gzip.open(localFile, 'wb') as f_out:
+            shutil.copyfileobj(f_in, f_out)
+
+    os.remove(tmpFile)
     
 
 def walkDists(parentDir, writePathRoot):
+    # array of symlinks to create later
+    defer = []
+
     for entry in os.scandir(parentDir):
         print("entry.path: " + entry.path)
         print("writePathRoot: " + writePathRoot)
@@ -124,13 +140,30 @@ def walkDists(parentDir, writePathRoot):
             pathlib.Path(curTargetPath).mkdir(parents=True, exist_ok=True)
             walkDists(entry.path, curTargetPath)
             print("leaving")
+
         elif entry.is_file():
             f_name, f_extension = os.path.splitext(entry.name)
             if f_extension == '.gz':
+                print(entry.name)
                 concatGzip(entry, writePathRoot)
             else:
                 shutil.copy2(entry.path, writePathRoot, follow_symlinks=False)
-            
+
+        elif entry.is_symlink():
+            print(">> found symlink????")
+            linkto = os.readlink(entry.path)
+            if not os.path.exists(linkto):
+                defer.append(tuple((linkto, entry.name)))
+                continue
+
+        else:
+            print("Unknown entry: " + entry.path + entry.name)
+
+
+    for (slink, name) in defer:
+        os.symlink(slink, ''.join([writePathRoot, '/', name]))
+
+ 
 
 def walkPool(parentDir, writePathRoot):
     for entry in os.scandir(parentDir):
