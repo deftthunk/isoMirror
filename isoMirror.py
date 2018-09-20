@@ -1,10 +1,7 @@
 #!/usr/bin/python3
 
-#
 # Build Debian apt mirror directory out of Debian ISO images.
-#
 # Use: isoMirror ISOFILE [ISOFILE2]... TARGET_DIR
-#
 
 import io, sys, os, re
 import subprocess
@@ -18,14 +15,8 @@ import gzip
 #class Dists:
 #    def __init__(self, folder):
 #        self.name = folder
-    
-
 #    def binary_amd64():
-        
-
 #    def i18n():
-        
-
 #    def debian_installer():
  
 
@@ -77,7 +68,7 @@ def mount(images):
     return mountDirs
 
 
-## gets Debian version; assumes all ISOs are same version
+## gets Debian version; assumes all ISOs are same version and subversion
 def getDebianVersion(mountDirs):
     releaseFile = "/dists/stable/Release"
     version = None
@@ -98,8 +89,6 @@ def getDebianVersion(mountDirs):
 
 
 def concatGzip(entry, writePathRoot):
-    #tmpFile = ''.join([writePathRoot, '/newtmp'])
-    #tmpFile2 = ''.join([writePathRoot, '/newtmp2'])
     tmpFile = ''.join([writePathRoot, '/newtmp'])
     localFile = ''.join([writePathRoot, '/', entry.name])
 
@@ -134,7 +123,6 @@ def walkDists(parentDir, writePathRoot):
 
     for entry in os.scandir(parentDir):
         print("entry.path: " + entry.path)
-        print("writePathRoot: " + writePathRoot)
         if entry.is_dir() and not entry.is_symlink():
             curTargetPath = ''.join([writePathRoot, '/', entry.name])
             pathlib.Path(curTargetPath).mkdir(parents=True, exist_ok=True)
@@ -150,29 +138,45 @@ def walkDists(parentDir, writePathRoot):
                 shutil.copy2(entry.path, writePathRoot, follow_symlinks=False)
 
         elif entry.is_symlink():
-            print(">> found symlink????")
             linkto = os.readlink(entry.path)
-            if not os.path.exists(linkto):
-                defer.append(tuple((linkto, entry.name)))
-                continue
+            #if not os.path.exists(linkto):
+            defer.append(tuple((linkto, entry.name)))
+            continue
 
         else:
             print("Unknown entry: " + entry.path + entry.name)
 
 
-    for (slink, name) in defer:
-        os.symlink(slink, ''.join([writePathRoot, '/', name]))
+    # create symlinks
+#    for (slink, name) in defer:
+#        print("===============")
+#        print("writepathroot: " + writePathRoot + '/stable')
+#        print("slink: " + slink)
+#        print("===============")
+        
+#        status_sym = subprocess.run(["sudo", "-S", "ln", "-s", \
+#                writePathRoot + '/stable', ''.join([writePathRoot, '/', slink]) ])
+#        if status_sym.returncode != 0:
+#            print("symlink creation failed")
 
+    for (slink, name) in defer:
+        path = ''.join([writePathRoot, '/', name])
+        if not os.path.exists(path):
+            os.symlink(slink, path)
  
 
 def walkPool(parentDir, writePathRoot):
     for entry in os.scandir(parentDir):
         print(entry)
+        
         if entry.is_dir() and not entry.is_symlink():
-            pathlib.path(entry.path).mkdir(parents=True, exist_ok=True)
-            walkPool(entry.path, writePathRoot)
-#        elif entry.is_symlink():
+            curTargetPath = ''.join([writePathRoot, '/', entry.name])
+            pathlib.Path(curTargetPath).mkdir(parents=True, exist_ok=True)
+            walkDists(entry.path, curTargetPath)
+            print("leaving")
 
+        elif entry.is_file():
+            shutil.copy2(entry.path, writePathRoot, follow_symlinks=False)
 
 
 # Builds path to write ISO image data to and overwrites empty folder if exists
@@ -184,10 +188,7 @@ def buildMirror(mountDirs, targetDir, debVersion):
     # copy dists
     for image in mountDirs:
         walkDists(image.name + "/dists", ''.join([writePathRoot, "/dists"]))
-    
-    # make symlink ....
-
-
+        walkPool(image.name + "/pool", ''.join([writePathRoot, "/pool"]))
 
 
 def cleanup(mountDirs):
