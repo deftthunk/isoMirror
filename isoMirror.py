@@ -10,6 +10,7 @@ import pathlib
 import distutils.dir_util
 import shutil
 import gzip
+import hashlib
 
 
 #class Dists:
@@ -148,17 +149,6 @@ def walkDists(parentDir, writePathRoot):
 
 
     # create symlinks
-#    for (slink, name) in defer:
-#        print("===============")
-#        print("writepathroot: " + writePathRoot + '/stable')
-#        print("slink: " + slink)
-#        print("===============")
-        
-#        status_sym = subprocess.run(["sudo", "-S", "ln", "-s", \
-#                writePathRoot + '/stable', ''.join([writePathRoot, '/', slink]) ])
-#        if status_sym.returncode != 0:
-#            print("symlink creation failed")
-
     for (slink, name) in defer:
         path = ''.join([writePathRoot, '/', name])
         if not os.path.exists(path):
@@ -167,16 +157,76 @@ def walkDists(parentDir, writePathRoot):
 
 def walkPool(parentDir, writePathRoot):
     for entry in os.scandir(parentDir):
-        print(entry)
+        print("Writing file: " + entry.name)
         
         if entry.is_dir() and not entry.is_symlink():
             curTargetPath = ''.join([writePathRoot, '/', entry.name])
             pathlib.Path(curTargetPath).mkdir(parents=True, exist_ok=True)
-            walkDists(entry.path, curTargetPath)
+            walkPool(entry.path, curTargetPath)
             print("leaving")
 
         elif entry.is_file():
             shutil.copy2(entry.path, writePathRoot, follow_symlinks=False)
+
+
+def calcSums(parentDir, fHash, fh):
+    for entry in os.scandir(parentDir):
+        print("entry.path: " + entry.path)
+        if entry.is_dir() and not entry.is_symlink():
+            calcSums(entry.path, fHash, fh)
+        else:
+            with open(entry.path, 'rb') as tmp_fh:
+                buf = tmp_fh.read()
+                fHash.update(buf)
+                fSize = os.path.getsize(entry.path)
+                mObj = re.search(r'\/stable\/(.*)', entry.path)
+                path = mObj.group(1)
+                
+                line = " {:>9} {:>9} {:>9}\n".format(fHash.hexdigest(), fSize, path)
+                fh.write(line)
+
+
+def calcRelease(distsPath):
+    print("DEBUG: starting calcRelease")
+    fPath = ''.join([distsPath, '/stable', '/Release'])
+    newPath = ''.join([distsPath, '/stable', '/Release.tmp'])
+    rel_fh = open(fPath, 'r')
+    new_fh = open(newPath, 'w')
+    
+    # capture header of old Release
+    print("DEBUG: writing header")
+    pat = re.compile('^Description\:\s')
+    for line in rel_fh:
+        new_fh.write(line)
+        if pat.match(line):
+            break
+
+    # Generate MD5Sum section
+    new_fh.write("MD5Sum:\n")
+    fHash = hashlib.md5()
+    calcSums(''.join([distsPath, '/stable/main']), fHash, new_fh)
+    calcSums(''.join([distsPath, '/stable/contrib']), fHash, new_fh)
+    
+    # Generate SHA1 section
+    new_fh.write("SHA1:\n")
+    fHash = hashlib.sha1()
+    calcSums(''.join([distsPath, '/stable/main']), fHash, new_fh)
+    calcSums(''.join([distsPath, '/stable/contrib']), fHash, new_fh)
+
+    # Generate SHA256 section
+    new_fh.write("SHA256:\n")
+    fHash = hashlib.sha256()
+    calcSums(''.join([distsPath, '/stable/main']), fHash, new_fh)
+    calcSums(''.join([distsPath, '/stable/contrib']), fHash, new_fh)
+
+    # Generate SHA512 section
+    new_fh.write("SHA512:\n")
+    fHash = hashlib.sha512()
+    calcSums(''.join([distsPath, '/stable/main']), fHash, new_fh)
+    calcSums(''.join([distsPath, '/stable/contrib']), fHash, new_fh)
+    
+    rel_fh.close()
+    new_fh.close()
 
 
 # Builds path to write ISO image data to and overwrites empty folder if exists
@@ -185,10 +235,11 @@ def buildMirror(mountDirs, targetDir, debVersion):
     print("Creating", writePathRoot)
     pathlib.Path(writePathRoot).mkdir(parents=True, exist_ok=True)
     
-    # copy dists
+    #copy files
     for image in mountDirs:
         walkDists(image.name + "/dists", ''.join([writePathRoot, "/dists"]))
-        walkPool(image.name + "/pool", ''.join([writePathRoot, "/pool"]))
+#        walkPool(image.name + "/pool", ''.join([writePathRoot, "/pool"]))
+        calcRelease(writePathRoot + "/dists")
 
 
 def cleanup(mountDirs):
