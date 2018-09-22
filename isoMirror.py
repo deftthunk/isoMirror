@@ -21,8 +21,6 @@ import hashlib
 #    def debian_installer():
  
 
-
-
 def checkUser():
     if(os.getuid() != 0):
         print("Run as root")
@@ -55,11 +53,10 @@ def mount(images):
     mountDirs = []
     for iso in images:
         dp = tempfile.TemporaryDirectory()
-        status = subprocess.run(["sudo", "-S", "mount", "-v", "-o", "ro", \
-                iso, dp.name])
-        print("Mounting", iso, "on", dp.name)
+        status = subprocess.run(["fuseiso", iso, dp.name])
+        print(">> Mounting", iso, "on", dp.name)
         if status.returncode != 0:
-            print("Mount failed:", status.returncode, dp.name)
+            print("Err: Mount failed:", status.returncode, dp.name)
             dp.close()
             cleanup(mountDirs)
             sys.exit()
@@ -78,11 +75,11 @@ def getDebianVersion(mountDirs):
             match = re.match('^Version:\s(\d\d?\.\d\d?)', line.rstrip())
             if match:
                 version = match.group(1)
-                print("Found Debian", version)
+                print(">> Found Debian", version)
                 break
         
         if version == None:
-            print("Error finding version")
+            print("Err: Problem finding version")
             fh.close()
             sys.exit()
     
@@ -123,17 +120,17 @@ def walkDists(parentDir, writePathRoot):
     defer = []
 
     for entry in os.scandir(parentDir):
-        print("entry.path: " + entry.path)
+        print("> wd: entry.path: " + entry.path)
         if entry.is_dir() and not entry.is_symlink():
             curTargetPath = ''.join([writePathRoot, '/', entry.name])
             pathlib.Path(curTargetPath).mkdir(parents=True, exist_ok=True)
             walkDists(entry.path, curTargetPath)
-            print("leaving")
+            print("> wd: leaving")
 
         elif entry.is_file():
             f_name, f_extension = os.path.splitext(entry.name)
             if f_extension == '.gz':
-                print(entry.name)
+                print("> wd: " + entry.name)
                 concatGzip(entry, writePathRoot)
             else:
                 shutil.copy2(entry.path, writePathRoot, follow_symlinks=False)
@@ -145,7 +142,7 @@ def walkDists(parentDir, writePathRoot):
             continue
 
         else:
-            print("Unknown entry: " + entry.path + entry.name)
+            print("Err: Unknown entry: " + entry.path + entry.name)
 
 
     # create symlinks
@@ -157,13 +154,13 @@ def walkDists(parentDir, writePathRoot):
 
 def walkPool(parentDir, writePathRoot):
     for entry in os.scandir(parentDir):
-        print("Writing file: " + entry.name)
+        print("> wp: Writing file: " + entry.name)
         
         if entry.is_dir() and not entry.is_symlink():
             curTargetPath = ''.join([writePathRoot, '/', entry.name])
             pathlib.Path(curTargetPath).mkdir(parents=True, exist_ok=True)
             walkPool(entry.path, curTargetPath)
-            print("leaving")
+            print("> wp: leaving")
 
         elif entry.is_file():
             shutil.copy2(entry.path, writePathRoot, follow_symlinks=False)
@@ -171,7 +168,7 @@ def walkPool(parentDir, writePathRoot):
 
 def calcSums(parentDir, fHash, fh):
     for entry in os.scandir(parentDir):
-        print("entry.path: " + entry.path)
+        print("> cs: entry.path: " + entry.path)
         if entry.is_dir() and not entry.is_symlink():
             calcSums(entry.path, fHash, fh)
         else:
@@ -187,14 +184,14 @@ def calcSums(parentDir, fHash, fh):
 
 
 def calcRelease(distsPath):
-    print("DEBUG: starting calcRelease")
+    print(">> starting calcRelease")
     fPath = ''.join([distsPath, '/stable', '/Release'])
     newPath = ''.join([distsPath, '/stable', '/Release.tmp'])
     rel_fh = open(fPath, 'r')
     new_fh = open(newPath, 'w')
     
     # capture header of old Release
-    print("DEBUG: writing header")
+    print(">> writing header")
     pat = re.compile('^Description\:\s')
     for line in rel_fh:
         new_fh.write(line)
@@ -225,8 +222,12 @@ def calcRelease(distsPath):
     calcSums(''.join([distsPath, '/stable/main']), fHash, new_fh)
     calcSums(''.join([distsPath, '/stable/contrib']), fHash, new_fh)
     
+    print("Closing release handles")
     rel_fh.close()
     new_fh.close()
+    
+    # Replace old Release file
+    os.replace(newPath, fPath)
 
 
 # Builds path to write ISO image data to and overwrites empty folder if exists
@@ -238,13 +239,13 @@ def buildMirror(mountDirs, targetDir, debVersion):
     #copy files
     for image in mountDirs:
         walkDists(image.name + "/dists", ''.join([writePathRoot, "/dists"]))
-#        walkPool(image.name + "/pool", ''.join([writePathRoot, "/pool"]))
+        walkPool(image.name + "/pool", ''.join([writePathRoot, "/pool"]))
         calcRelease(writePathRoot + "/dists")
 
 
 def cleanup(mountDirs):
     for d in mountDirs:
-        subprocess.run(["umount", "-v", d.name])
+        subprocess.run(["fusermount", "-u", d.name])
         d.cleanup()
 
 
@@ -254,7 +255,6 @@ def main():
     mountDirs = mount(images)
     debVersion = getDebianVersion(mountDirs)
     buildMirror(mountDirs, targetDir, debVersion)
-
     cleanup(mountDirs)
 
 
