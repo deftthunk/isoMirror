@@ -67,14 +67,6 @@ def getDebianVersion(mountDirs):
     return version
 
 
-#def fixReleaseHeader(filePath):
-#    with open(filePath, "rw") as fh:
-#        for line in fh:
-#            match = re.match('^Acquire-By-Hash\:\syes', line.rstrip())
-#            if match:
-#            version = match.group(1)
-    
-
 def fixReleaseHeader(filePath):
     pattern = 'Acquire-By-Hash: yes'
     newStr = 'Acquire-By-Hash: no'
@@ -84,19 +76,17 @@ def fixReleaseHeader(filePath):
     with os.fdopen(fh, 'w') as new_file:
         with open(filePath) as old_file:
             for line in old_file:
+                print("DEBUG: " + line)
                 new_file.write(line.replace(pattern, newStr))
                 
-                #Remove original file
-                os.remove(filePath)
-                #Move new file
-                shutil.move(abs_path, filePath)
-
+    #Replace orig file with new
+    os.remove(filePath)
+    shutil.move(abs_path, filePath)
 
 
 def concatGzip(entry, writePathRoot):
     tmpFile = ''.join([writePathRoot, '/newtmp'])
     localFile = ''.join([writePathRoot, '/', entry.name])
-
 
     # if gzip file already exists
     if os.path.exists(localFile):
@@ -138,25 +128,25 @@ def walkDists(parentDir, writePathRoot):
         elif entry.is_file():
             f_name, f_extension = os.path.splitext(entry.name)
             if f_extension == '.gz':
-                print("> wd: " + entry.name)
+                print("> wd: gzip: " + entry.name)
                 concatGzip(entry, writePathRoot)
             else:
+                print("wd file copy")
                 shutil.copy(entry.path, writePathRoot, follow_symlinks=False)
                 os.chmod(curTargetPath, 0o644)
                 
                 if os.path.basename(curTargetPath) == 'Release':
+                    print("wd Release header")
                     fixReleaseHeader(curTargetPath)
-              
-
 
         elif entry.is_symlink():
+            print("wd symlink")
             linkto = os.readlink(entry.path)
             defer.append(tuple((linkto, entry.name)))
             continue
 
         else:
-            print("Err: Unknown entry: " + entry.path + entry.name)
-
+            print("wd: Err: Unknown entry: " + entry.path + entry.name)
 
     # create symlinks
     for (slink, name) in defer:
@@ -259,7 +249,7 @@ def buildMirror(mountDirs, targetDir, debVersion):
     #copy files
     for image in mountDirs:
         walkDists(image.name + "/dists", ''.join([writePathRoot, "/dists"]))
-#        walkPool(image.name + "/pool", ''.join([writePathRoot, "/pool"]))
+        walkPool(image.name + "/pool", ''.join([writePathRoot, "/pool"]))
 
     calcRelease(writePathRoot + "/dists")
 
