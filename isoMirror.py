@@ -13,25 +13,6 @@ import gzip
 import hashlib
 
 
-#class Dists:
-#    def __init__(self, folder):
-#        self.name = folder
-#    def binary_amd64():
-#    def i18n():
-#    def debian_installer():
- 
-
-def checkUser():
-    if(os.getuid() != 0):
-        print("Run as root")
-        sys.exit()
-    else:
-        # attempt to find user name
-        cwd = os.getcwd().split('/')
-        if cwd[0] == 'home':
-            user = cwd[1]
-
-
 def getInput():
     numArgs = len(sys.argv)
     
@@ -86,6 +67,32 @@ def getDebianVersion(mountDirs):
     return version
 
 
+#def fixReleaseHeader(filePath):
+#    with open(filePath, "rw") as fh:
+#        for line in fh:
+#            match = re.match('^Acquire-By-Hash\:\syes', line.rstrip())
+#            if match:
+#            version = match.group(1)
+    
+
+def fixReleaseHeader(filePath):
+    pattern = 'Acquire-By-Hash: yes'
+    newStr = 'Acquire-By-Hash: no'
+    
+    #Create temp file
+    fh, abs_path = tempfile.mkstemp()
+    with os.fdopen(fh, 'w') as new_file:
+        with open(filePath) as old_file:
+            for line in old_file:
+                new_file.write(line.replace(pattern, newStr))
+                
+                #Remove original file
+                os.remove(filePath)
+                #Move new file
+                shutil.move(abs_path, filePath)
+
+
+
 def concatGzip(entry, writePathRoot):
     tmpFile = ''.join([writePathRoot, '/newtmp'])
     localFile = ''.join([writePathRoot, '/', entry.name])
@@ -109,7 +116,7 @@ def concatGzip(entry, writePathRoot):
 
     # zip up whatever's left
     with open(tmpFile, 'rb') as f_in:
-        with gzip.open(localFile, 'wb') as f_out:
+        with gzip.GzipFile(localFile, 'wb') as f_out:
             shutil.copyfileobj(f_in, f_out)
 
     os.remove(tmpFile)
@@ -121,8 +128,9 @@ def walkDists(parentDir, writePathRoot):
 
     for entry in os.scandir(parentDir):
         print("> wd: entry.path: " + entry.path)
+        curTargetPath = ''.join([writePathRoot, '/', entry.name])
+
         if entry.is_dir() and not entry.is_symlink():
-            curTargetPath = ''.join([writePathRoot, '/', entry.name])
             pathlib.Path(curTargetPath).mkdir(parents=True, exist_ok=True)
             walkDists(entry.path, curTargetPath)
             print("> wd: leaving")
@@ -133,11 +141,16 @@ def walkDists(parentDir, writePathRoot):
                 print("> wd: " + entry.name)
                 concatGzip(entry, writePathRoot)
             else:
-                shutil.copy2(entry.path, writePathRoot, follow_symlinks=False)
+                shutil.copy(entry.path, writePathRoot, follow_symlinks=False)
+                os.chmod(curTargetPath, 0o644)
+                
+                if os.path.basename(curTargetPath) == 'Release':
+                    fixReleaseHeader(curTargetPath)
+              
+
 
         elif entry.is_symlink():
             linkto = os.readlink(entry.path)
-            #if not os.path.exists(linkto):
             defer.append(tuple((linkto, entry.name)))
             continue
 
@@ -228,6 +241,13 @@ def calcRelease(distsPath):
     
     # Replace old Release file
     os.replace(newPath, fPath)
+    
+    # Make Release.gpg
+    gpgPath = ''.join([distsPath, '/stable', '/Release.gpg'])
+    inReleasePath = ''.join([distsPath, '/stable', '/InRelease'])
+    subprocess.run(["gpg", "--armor", "--output", gpgPath, "--detach-sign", fPath])
+    subprocess.run(["gpg", "--clearsign", "--output", inReleasePath, fPath])
+    print("GPG and InRelease done")
 
 
 # Builds path to write ISO image data to and overwrites empty folder if exists
@@ -239,8 +259,9 @@ def buildMirror(mountDirs, targetDir, debVersion):
     #copy files
     for image in mountDirs:
         walkDists(image.name + "/dists", ''.join([writePathRoot, "/dists"]))
-        walkPool(image.name + "/pool", ''.join([writePathRoot, "/pool"]))
-        calcRelease(writePathRoot + "/dists")
+#        walkPool(image.name + "/pool", ''.join([writePathRoot, "/pool"]))
+
+    calcRelease(writePathRoot + "/dists")
 
 
 def cleanup(mountDirs):
@@ -250,7 +271,6 @@ def cleanup(mountDirs):
 
 
 def main():
-    #checkUser()
     targetDir, images = getInput()
     mountDirs = mount(images)
     debVersion = getDebianVersion(mountDirs)
