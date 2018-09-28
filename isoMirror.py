@@ -70,19 +70,23 @@ def getDebianVersion(mountDirs):
 # disables "Acquire-By-Hash" feature and updates the datetime stamp
 def fixReleaseHeader(filePath):
     patternHash = 'Acquire-By-Hash: yes'
-    patternDate = 'Date: Sat, 09 Dec 2017 09:16:24 UTC'
     newStrHash = 'Acquire-By-Hash: no'
     newStrDate = 'Date: Sat, 09 Dec 2020 09:16:24 UTC'
+    regexDate = re.compile('^Date:\s(.*)$')
     
     #Create temp file
     fh, abs_path = tempfile.mkstemp()
     with os.fdopen(fh, 'w') as new_file:
         with open(filePath) as old_file:
             for line in old_file:
-#                print("DEBUG: " + line)
-                new_file.write(line.replace(patternHash, newStrHash))
-                new_file.write(line.replace(patternDate, newStrDate))
-                
+                if re.match('^Date\:\s', line.rstrip()):
+                    newDate = re.sub(r'^(Date:\s).*$',
+                            r'\1Sat, 26 Sep 2018 12:12:12 UTC',
+                            line, 1)
+                    new_file.write(newDate)
+                else:
+                    new_file.write(line.replace(patternHash, newStrHash))
+
     #Replace orig file with new
     os.remove(filePath)
     shutil.move(abs_path, filePath)
@@ -136,24 +140,19 @@ def walkDists(parentDir, writePathRoot):
         if entry.is_dir() and not entry.is_symlink():
             pathlib.Path(curTargetPath).mkdir(parents=True, exist_ok=True)
             walkDists(entry.path, curTargetPath)
-#            print("> wd: leaving")
 
         elif entry.is_file():
             f_name, f_extension = os.path.splitext(entry.name)
             if f_extension == '.gz':
-#                print("> wd: gzip: " + entry.name)
                 concatGzip(entry, writePathRoot)
             else:
-#                print("wd file copy")
                 shutil.copy(entry.path, writePathRoot, follow_symlinks=False)
                 os.chmod(curTargetPath, 0o644)
                 
                 if os.path.basename(curTargetPath) == 'Release':
-#                    print("wd Release header")
                     fixReleaseHeader(curTargetPath)
 
         elif entry.is_symlink():
-#            print("wd symlink")
             linkto = os.readlink(entry.path)
             defer.append(tuple((linkto, entry.name)))
             continue
@@ -176,26 +175,36 @@ def walkPool(parentDir, writePathRoot):
             curTargetPath = ''.join([writePathRoot, '/', entry.name])
             pathlib.Path(curTargetPath).mkdir(parents=True, exist_ok=True)
             walkPool(entry.path, curTargetPath)
-#            print("> wp: leaving")
 
         elif entry.is_file():
             shutil.copy2(entry.path, writePathRoot, follow_symlinks=False)
 
 
-def calcSums(parentDir, fHash, fh):
+def calcSums(parentDir, algo, fh):
     for entry in os.scandir(parentDir):
         print("> cs: entry.path: " + entry.path)
         if entry.is_dir() and not entry.is_symlink():
-            calcSums(entry.path, fHash, fh)
+            calcSums(entry.path, algo, fh)
         else:
+            # MD5 requires reading chunks of 128*N bytes, so
+            # applying it to all hashes
             with open(entry.path, 'rb') as tmp_fh:
                 buf = tmp_fh.read()
-                fHash.update(buf)
+                if algo == 'md5':
+                    fHash = hashlib.md5(buf)
+                if algo == 'sha1':
+                    fHash = hashlib.sha1(buf)
+                if algo == 'sha256':
+                    fHash = hashlib.sha256(buf)
+                if algo == 'sha512':
+                    fHash = hashlib.sha512(buf)
+
                 fSize = os.path.getsize(entry.path)
                 mObj = re.search(r'\/stable\/(.*)', entry.path)
                 path = mObj.group(1)
                 
-                line = " {:>9} {:>9} {:>9}\n".format(fHash.hexdigest(), fSize, path)
+                line = " {:>9} {:>9} {:>9}\n".format(fHash.hexdigest(), \
+                        fSize, path)
                 fh.write(line)
 
 
@@ -207,7 +216,6 @@ def calcRelease(distsPath):
     new_fh = open(newPath, 'w')
     
     # capture header of old Release
-#    print(">> writing header")
     pat = re.compile('^Description\:\s')
     for line in rel_fh:
         new_fh.write(line)
@@ -216,27 +224,27 @@ def calcRelease(distsPath):
 
     # Generate MD5Sum section
     new_fh.write("MD5Sum:\n")
-    fHash = hashlib.md5()
-    calcSums(''.join([distsPath, '/stable/main']), fHash, new_fh)
-    calcSums(''.join([distsPath, '/stable/contrib']), fHash, new_fh)
+    algo = 'md5'
+    calcSums(''.join([distsPath, '/stable/main']), algo, new_fh)
+    calcSums(''.join([distsPath, '/stable/contrib']), algo, new_fh)
     
     # Generate SHA1 section
     new_fh.write("SHA1:\n")
-    fHash = hashlib.sha1()
-    calcSums(''.join([distsPath, '/stable/main']), fHash, new_fh)
-    calcSums(''.join([distsPath, '/stable/contrib']), fHash, new_fh)
+    algo = 'sha1'
+    calcSums(''.join([distsPath, '/stable/main']), algo, new_fh)
+    calcSums(''.join([distsPath, '/stable/contrib']), algo, new_fh)
 
     # Generate SHA256 section
     new_fh.write("SHA256:\n")
-    fHash = hashlib.sha256()
-    calcSums(''.join([distsPath, '/stable/main']), fHash, new_fh)
-    calcSums(''.join([distsPath, '/stable/contrib']), fHash, new_fh)
+    algo = 'sha256'
+    calcSums(''.join([distsPath, '/stable/main']), algo, new_fh)
+    calcSums(''.join([distsPath, '/stable/contrib']), algo, new_fh)
 
     # Generate SHA512 section
     new_fh.write("SHA512:\n")
-    fHash = hashlib.sha512()
-    calcSums(''.join([distsPath, '/stable/main']), fHash, new_fh)
-    calcSums(''.join([distsPath, '/stable/contrib']), fHash, new_fh)
+    algo = 'sha512'
+    calcSums(''.join([distsPath, '/stable/main']), algo, new_fh)
+    calcSums(''.join([distsPath, '/stable/contrib']), algo, new_fh)
     
     print("Closing release handles")
     rel_fh.close()
@@ -254,7 +262,7 @@ def calcRelease(distsPath):
     
     # Make KEY.gpg
     keyPath = ''.join([distsPath, '/stable', '/KEY.gpg'])
-    keyId = 'FDE53A2826658E4B'
+    keyId = ''
     subprocess.run(["gpg", "--output", keyPath, "--armor", "--export", keyId])
 
 
