@@ -67,17 +67,21 @@ def getDebianVersion(mountDirs):
     return version
 
 
+# disables "Acquire-By-Hash" feature and updates the datetime stamp
 def fixReleaseHeader(filePath):
-    pattern = 'Acquire-By-Hash: yes'
-    newStr = 'Acquire-By-Hash: no'
+    patternHash = 'Acquire-By-Hash: yes'
+    patternDate = 'Date: Sat, 09 Dec 2017 09:16:24 UTC'
+    newStrHash = 'Acquire-By-Hash: no'
+    newStrDate = 'Date: Sat, 09 Dec 2020 09:16:24 UTC'
     
     #Create temp file
     fh, abs_path = tempfile.mkstemp()
     with os.fdopen(fh, 'w') as new_file:
         with open(filePath) as old_file:
             for line in old_file:
-                print("DEBUG: " + line)
-                new_file.write(line.replace(pattern, newStr))
+#                print("DEBUG: " + line)
+                new_file.write(line.replace(patternHash, newStrHash))
+                new_file.write(line.replace(patternDate, newStrDate))
                 
     #Replace orig file with new
     os.remove(filePath)
@@ -109,7 +113,16 @@ def concatGzip(entry, writePathRoot):
         with gzip.GzipFile(localFile, 'wb') as f_out:
             shutil.copyfileobj(f_in, f_out)
 
-    os.remove(tmpFile)
+    if os.path.basename(localFile) == 'Packages.gz':
+        newPackage = ''.join([writePathRoot, '/Packages'])
+        newPackageXz = ''.join([writePathRoot, '/Packages.xz'])
+        if os.path.exists(newPackageXz):
+            os.remove(newPackageXz)
+
+        os.replace(tmpFile, newPackage)
+        subprocess.run(["xz", "-zk", newPackage])
+    else:
+        os.remove(tmpFile)
     
 
 def walkDists(parentDir, writePathRoot):
@@ -123,24 +136,24 @@ def walkDists(parentDir, writePathRoot):
         if entry.is_dir() and not entry.is_symlink():
             pathlib.Path(curTargetPath).mkdir(parents=True, exist_ok=True)
             walkDists(entry.path, curTargetPath)
-            print("> wd: leaving")
+#            print("> wd: leaving")
 
         elif entry.is_file():
             f_name, f_extension = os.path.splitext(entry.name)
             if f_extension == '.gz':
-                print("> wd: gzip: " + entry.name)
+#                print("> wd: gzip: " + entry.name)
                 concatGzip(entry, writePathRoot)
             else:
-                print("wd file copy")
+#                print("wd file copy")
                 shutil.copy(entry.path, writePathRoot, follow_symlinks=False)
                 os.chmod(curTargetPath, 0o644)
                 
                 if os.path.basename(curTargetPath) == 'Release':
-                    print("wd Release header")
+#                    print("wd Release header")
                     fixReleaseHeader(curTargetPath)
 
         elif entry.is_symlink():
-            print("wd symlink")
+#            print("wd symlink")
             linkto = os.readlink(entry.path)
             defer.append(tuple((linkto, entry.name)))
             continue
@@ -163,7 +176,7 @@ def walkPool(parentDir, writePathRoot):
             curTargetPath = ''.join([writePathRoot, '/', entry.name])
             pathlib.Path(curTargetPath).mkdir(parents=True, exist_ok=True)
             walkPool(entry.path, curTargetPath)
-            print("> wp: leaving")
+#            print("> wp: leaving")
 
         elif entry.is_file():
             shutil.copy2(entry.path, writePathRoot, follow_symlinks=False)
@@ -194,7 +207,7 @@ def calcRelease(distsPath):
     new_fh = open(newPath, 'w')
     
     # capture header of old Release
-    print(">> writing header")
+#    print(">> writing header")
     pat = re.compile('^Description\:\s')
     for line in rel_fh:
         new_fh.write(line)
@@ -238,6 +251,11 @@ def calcRelease(distsPath):
     subprocess.run(["gpg", "--armor", "--output", gpgPath, "--detach-sign", fPath])
     subprocess.run(["gpg", "--clearsign", "--output", inReleasePath, fPath])
     print("GPG and InRelease done")
+    
+    # Make KEY.gpg
+    keyPath = ''.join([distsPath, '/stable', '/KEY.gpg'])
+    keyId = 'FDE53A2826658E4B'
+    subprocess.run(["gpg", "--output", keyPath, "--armor", "--export", keyId])
 
 
 # Builds path to write ISO image data to and overwrites empty folder if exists
