@@ -49,7 +49,6 @@ def mount(images):
             sys.exit()
 
         mountDirs.append(dp)
-    
     return mountDirs
 
 
