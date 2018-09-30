@@ -11,6 +11,12 @@ import distutils.dir_util
 import shutil
 import gzip
 import hashlib
+import time
+
+
+# give me an id!!! (or not)
+# gpg --fingerprint
+gpg_key_id = '26658E4B'
 
 
 def getInput():
@@ -71,7 +77,7 @@ def getDebianVersion(mountDirs):
 def fixReleaseHeader(filePath):
     patternHash = 'Acquire-By-Hash: yes'
     newStrHash = 'Acquire-By-Hash: no'
-    newStrDate = 'Date: Sat, 09 Dec 2020 09:16:24 UTC'
+    newStr = time.strftime("Date: %a, %d %b %Y %H:%M:%S UTC", time.localtime())
     regexDate = re.compile('^Date:\s(.*)$')
     
     #Create temp file
@@ -80,9 +86,7 @@ def fixReleaseHeader(filePath):
         with open(filePath) as old_file:
             for line in old_file:
                 if re.match('^Date\:\s', line.rstrip()):
-                    newDate = re.sub(r'^(Date:\s).*$',
-                            r'\1Sat, 26 Sep 2018 12:12:12 UTC',
-                            line, 1)
+                    newDate = re.sub(r'^(Date:\s).*$', newStr, line, 1)
                     new_file.write(newDate)
                 else:
                     new_file.write(line.replace(patternHash, newStrHash))
@@ -186,8 +190,6 @@ def calcSums(parentDir, algo, fh):
         if entry.is_dir() and not entry.is_symlink():
             calcSums(entry.path, algo, fh)
         else:
-            # MD5 requires reading chunks of 128*N bytes, so
-            # applying it to all hashes
             with open(entry.path, 'rb') as tmp_fh:
                 buf = tmp_fh.read()
                 if algo == 'md5':
@@ -203,6 +205,7 @@ def calcSums(parentDir, algo, fh):
                 mObj = re.search(r'\/stable\/(.*)', entry.path)
                 path = mObj.group(1)
                 
+                # right align values
                 line = " {:>9} {:>9} {:>9}\n".format(fHash.hexdigest(), \
                         fSize, path)
                 fh.write(line)
@@ -262,7 +265,7 @@ def calcRelease(distsPath):
     
     # Make KEY.gpg
     keyPath = ''.join([distsPath, '/stable', '/KEY.gpg'])
-    keyId = ''
+    keyId = gpg_key_id
     subprocess.run(["gpg", "--output", keyPath, "--armor", "--export", keyId])
 
 
