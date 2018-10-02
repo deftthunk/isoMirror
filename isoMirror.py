@@ -41,10 +41,9 @@ def mount(images):
     for iso in images:
         dp = tempfile.TemporaryDirectory()
         status = subprocess.run(["fuseiso", iso, dp.name])
-        print(">> Mounting", iso, "on", dp.name)
+        print("> Mounting", iso, "on", dp.name)
         if status.returncode != 0:
-            print("Err: Mount failed:", status.returncode, dp.name)
-            dp.close()
+            print("> ERROR: Mount failed:", status.returncode, dp.name)
             cleanup(mountDirs)
             sys.exit()
 
@@ -61,11 +60,11 @@ def getDebianVersion(mountDirs):
             match = re.match('^Version:\s(\d\d?\.\d\d?)', line.rstrip())
             if match:
                 version = match.group(1)
-                print(">> Found Debian", version)
+                print("> Found Debian", version)
                 break
         
         if version == None:
-            print("Err: Problem finding version")
+            print("> ERROR: Problem finding version")
             fh.close()
             sys.exit()
     
@@ -137,7 +136,7 @@ def walkDists(parentDir, writePathRoot):
     defer = []
 
     for entry in os.scandir(parentDir):
-        print("> wd: entry.path: " + entry.path)
+        print("\x1b[2K\r> dists: {}".format(entry.path), end='\r')
         curTargetPath = ''.join([writePathRoot, '/', entry.name])
 
         if entry.is_dir() and not entry.is_symlink():
@@ -161,7 +160,7 @@ def walkDists(parentDir, writePathRoot):
             continue
 
         else:
-            print("wd: Err: Unknown entry: " + entry.path + entry.name)
+            print("> ERROR: Unknown entry: " + entry.path + entry.name)
 
     # create symlinks
     for (slink, name) in defer:
@@ -172,7 +171,7 @@ def walkDists(parentDir, writePathRoot):
 
 def walkPool(parentDir, writePathRoot):
     for entry in os.scandir(parentDir):
-        print("> wp: Writing file: " + entry.name)
+        print("\x1b[2K\r> pool: {}".format(entry.name), end='\r')
         
         if entry.is_dir() and not entry.is_symlink():
             curTargetPath = ''.join([writePathRoot, '/', entry.name])
@@ -185,7 +184,7 @@ def walkPool(parentDir, writePathRoot):
 
 def calcSums(parentDir, algo, fh):
     for entry in os.scandir(parentDir):
-        print("> cs: entry.path: " + entry.path)
+        print("\x1b[2K\r> gen checksum: {}".format(entry.path), end='\r')
         if entry.is_dir() and not entry.is_symlink():
             calcSums(entry.path, algo, fh)
         else:
@@ -211,7 +210,7 @@ def calcSums(parentDir, algo, fh):
 
 
 def calcRelease(distsPath):
-    print(">> starting calcRelease")
+    print("> Calculating Release file")
     fPath = ''.join([distsPath, '/stable', '/Release'])
     newPath = ''.join([distsPath, '/stable', '/Release.tmp'])
     rel_fh = open(fPath, 'r')
@@ -248,7 +247,6 @@ def calcRelease(distsPath):
     calcSums(''.join([distsPath, '/stable/main']), algo, new_fh)
     calcSums(''.join([distsPath, '/stable/contrib']), algo, new_fh)
     
-    print("Closing release handles")
     rel_fh.close()
     new_fh.close()
     
@@ -260,7 +258,7 @@ def calcRelease(distsPath):
     inReleasePath = ''.join([distsPath, '/stable', '/InRelease'])
     subprocess.run(["gpg", "--armor", "--output", gpgPath, "--detach-sign", fPath])
     subprocess.run(["gpg", "--clearsign", "--output", inReleasePath, fPath])
-    print("GPG and InRelease done")
+    print("> Completed Release.gpg, InRelease")
     
     # Make KEY.gpg
     keyPath = ''.join([distsPath, '/stable', '/KEY.gpg'])
@@ -270,13 +268,18 @@ def calcRelease(distsPath):
 
 # Builds path to write ISO image data to and overwrites empty folder if exists
 def buildMirror(mountDirs, targetDir, debVersion):
-    writePathRoot = ''.join([targetDir, debVersion, "/debian"])
-    print("Creating", writePathRoot)
+    writePathRoot = ''.join([targetDir, "/debian/", debVersion])
+    print("> Creating ", writePathRoot)
     pathlib.Path(writePathRoot).mkdir(parents=True, exist_ok=True)
     
     #copy files
     for image in mountDirs:
+        print("> ISO: {}".format(image.name))
+        print("> Copying dists folder")
+        print("")
         walkDists(image.name + "/dists", ''.join([writePathRoot, "/dists"]))
+        print("> Copying pool folder")
+        print("")
         walkPool(image.name + "/pool", ''.join([writePathRoot, "/pool"]))
 
     calcRelease(writePathRoot + "/dists")
