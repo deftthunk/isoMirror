@@ -54,6 +54,11 @@ def mount(images):
 ## gets Debian version; assumes all ISOs are same version and subversion
 def getDebianVersion(mountDirs):
     releaseFile = "/dists/stable/Release"
+    suite = 'stable'
+    if not os.path.exists(mountDirs[0].name + releaseFile):
+        releaseFile = '/dists/oldstable/Release'
+        suite = 'oldstable'
+
     version = None
     with open(mountDirs[0].name + releaseFile, "r") as fh:
         for line in fh:
@@ -68,14 +73,15 @@ def getDebianVersion(mountDirs):
             fh.close()
             sys.exit()
     
-    return version
+    return version, suite
 
 
 # disables "Acquire-By-Hash" feature and updates the datetime stamp
 def fixReleaseHeader(filePath):
     patternHash = 'Acquire-By-Hash: yes'
     newStrHash = 'Acquire-By-Hash: no'
-    newStr = time.strftime("Date: %a, %d %b %Y %H:%M:%S UTC", time.localtime())
+    replaceDate = time.strftime("Date: %a, %d %b %Y %H:%M:%S UTC", time.localtime())
+    replaceSuite = 'stable'
     regexDate = re.compile('^Date:\s(.*)$')
     
     #Create temp file
@@ -84,8 +90,11 @@ def fixReleaseHeader(filePath):
         with open(filePath) as old_file:
             for line in old_file:
                 if re.match('^Date\:\s', line.rstrip()):
-                    newDate = re.sub(r'^(Date:\s).*$', newStr, line, 1)
+                    newDate = re.sub(r'^(Date:\s).*$', replaceDate, line, 1)
                     new_file.write(newDate)
+                elif re.match('^Suite\:\soldstable', line.rstrip()):
+                    newSuite = re.sub(r'^(Suite:\s).*$', replaceSuite, line, 1)
+                    new_file.write(newSuite)
                 else:
                     new_file.write(line.replace(patternHash, newStrHash))
 
@@ -131,24 +140,27 @@ def concatGzip(entry, writePathRoot):
         os.remove(tmpFile)
     
 
-def walkDists(parentDir, writePathRoot):
+def walkDists(srcDists, dstDists, suite):
     # array of symlinks to create later
     defer = []
 
-    for entry in os.scandir(parentDir):
+    for entry in os.scandir(srcDists):
         print("\x1b[2K\r> dists: {}".format(entry.path), end='\r')
-        curTargetPath = ''.join([writePathRoot, '/', entry.name])
+        curTargetPath = ''.join([dstDists, '/', entry.name])
+        
+        if entry.name == 'oldstable':
+            curTargetPath = ''.join([dstDists, '/', 'stable'])
 
         if entry.is_dir() and not entry.is_symlink():
             pathlib.Path(curTargetPath).mkdir(parents=True, exist_ok=True)
-            walkDists(entry.path, curTargetPath)
+            walkDists(entry.path, curTargetPath, suite)
 
         elif entry.is_file():
             f_name, f_extension = os.path.splitext(entry.name)
             if f_extension == '.gz':
-                concatGzip(entry, writePathRoot)
+                concatGzip(entry, dstDists)
             else:
-                shutil.copy(entry.path, writePathRoot, follow_symlinks=False)
+                shutil.copy(entry.path, dstDists, follow_symlinks=False)
                 os.chmod(curTargetPath, 0o644)
                 
                 if os.path.basename(curTargetPath) == 'Release':
@@ -156,7 +168,12 @@ def walkDists(parentDir, writePathRoot):
 
         elif entry.is_symlink():
             linkto = os.readlink(entry.path)
-            defer.append(tuple((linkto, entry.name)))
+            # if prior debian release, fix 'oldstable' to 'stable'
+            if entry.name == 'oldstable':
+                defer.append(tuple((linkto, 'stable')))
+            else:
+                defer.append(tuple((linkto, entry.name)))
+
             continue
 
         else:
@@ -164,22 +181,22 @@ def walkDists(parentDir, writePathRoot):
 
     # create symlinks
     for (slink, name) in defer:
-        path = ''.join([writePathRoot, '/', name])
+        path = ''.join([dstDists, '/', name])
         if not os.path.exists(path):
             os.symlink(slink, path)
  
 
-def walkPool(parentDir, writePathRoot):
-    for entry in os.scandir(parentDir):
+def walkPool(srcPool, dstPool, suite):
+    for entry in os.scandir(srcPool):
         print("\x1b[2K\r> pool: {}".format(entry.name), end='\r')
         
         if entry.is_dir() and not entry.is_symlink():
-            curTargetPath = ''.join([writePathRoot, '/', entry.name])
+            curTargetPath = ''.join([dstPool, '/', entry.name])
             pathlib.Path(curTargetPath).mkdir(parents=True, exist_ok=True)
-            walkPool(entry.path, curTargetPath)
+            walkPool(entry.path, curTargetPath, suite)
 
         elif entry.is_file():
-            shutil.copy2(entry.path, writePathRoot, follow_symlinks=False)
+            shutil.copy2(entry.path, dstPool, follow_symlinks=False)
 
 
 def calcSums(parentDir, algo, fh):
@@ -267,7 +284,7 @@ def calcRelease(distsPath):
 
 
 # Builds path to write ISO image data to and overwrites empty folder if exists
-def buildMirror(mountDirs, targetDir, debVersion):
+def buildMirror(mountDirs, targetDir, debVersion, suite):
     writePathRoot = ''.join([targetDir, "/debian/", debVersion])
     print("> Creating ", writePathRoot)
     pathlib.Path(writePathRoot).mkdir(parents=True, exist_ok=True)
@@ -277,10 +294,10 @@ def buildMirror(mountDirs, targetDir, debVersion):
         print("> ISO: {}".format(image.name))
         print("> Copying dists folder")
         print("")
-        walkDists(image.name + "/dists", ''.join([writePathRoot, "/dists"]))
+        walkDists(image.name + "/dists", ''.join([writePathRoot, "/dists"]), suite)
         print("> Copying pool folder")
         print("")
-        walkPool(image.name + "/pool", ''.join([writePathRoot, "/pool"]))
+        walkPool(image.name + "/pool", ''.join([writePathRoot, "/pool"]), suite)
 
     calcRelease(writePathRoot + "/dists")
 
@@ -294,8 +311,8 @@ def cleanup(mountDirs):
 def main():
     targetDir, images = getInput()
     mountDirs = mount(images)
-    debVersion = getDebianVersion(mountDirs)
-    buildMirror(mountDirs, targetDir, debVersion)
+    debVersion, suite = getDebianVersion(mountDirs)
+    buildMirror(mountDirs, targetDir, debVersion, suite)
     cleanup(mountDirs)
 
 
