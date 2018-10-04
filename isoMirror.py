@@ -15,13 +15,17 @@ import time
 
 
 # give me an id!!! (or not)
-# gpg --fingerprint
-gpg_key_id = '26658E4B'
+# gpg --fingerprint; last 8 chars
+gpg_key_id = ''
 
 
 def getInput():
     numArgs = len(sys.argv)
     
+    if gpg_key_id == '':
+        print("> You must first populate 'gpg_key_id' variable with a value")
+        sys.exit()
+
     if numArgs < 3:
         scriptName = os.path.basename(__file__)
         print("Usage:")
@@ -283,7 +287,7 @@ def calcRelease(distsPath):
     subprocess.run(["gpg", "--output", keyPath, "--armor", "--export", keyId])
 
 
-# Builds path to write ISO image data to and overwrites empty folder if exists
+# Build path to write ISO image data to and overwrites empty folder if exists
 def buildMirror(mountDirs, targetDir, debVersion, suite):
     writePathRoot = ''.join([targetDir, "/debian/", debVersion])
     print("> Creating ", writePathRoot)
@@ -293,10 +297,10 @@ def buildMirror(mountDirs, targetDir, debVersion, suite):
     for image in mountDirs:
         print("> ISO: {}".format(image.name))
         print("> Copying dists folder")
-        print("")
+        print(">")
         walkDists(image.name + "/dists", ''.join([writePathRoot, "/dists"]), suite)
         print("> Copying pool folder")
-        print("")
+        print(">")
         walkPool(image.name + "/pool", ''.join([writePathRoot, "/pool"]), suite)
 
     calcRelease(writePathRoot + "/dists")
