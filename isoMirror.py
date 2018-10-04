@@ -297,7 +297,6 @@ def buildMirror(mountDirs, targetDir, debVersion, suite):
     for image in mountDirs:
         print("> ISO: {}".format(image.name))
         print("> Copying dists folder")
-        print(">")
         walkDists(image.name + "/dists", ''.join([writePathRoot, "/dists"]), suite)
         print("> Copying pool folder")
         print(">")
