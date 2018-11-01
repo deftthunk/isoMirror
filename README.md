@@ -1,4 +1,4 @@
-# isoMirror
+# mk_mirror
 
 Create an offline, signed Debian repository file structure from one or more 
 Debian DVD/CD ISO images. Intended to be paired with a webserver for hosting.
@@ -9,6 +9,9 @@ Script will mount and copy ISO image contents to a target directory, creating
 the 'dists' and 'pool' folders and their contents. An 'InRelease' and
 'Release.gpg' file are also generated using the user's default GPG key.
 
+If given the -r flag, it will instead fix/generate the Release, Release.gpg,
+InRelease, and KEY.gpg files for an existing repo with the given GPG signature.
+
 Requirements:
 - Web server for hosting content on network
 - Pre-made GPG key pair in user's .gpg folder
@@ -18,7 +21,9 @@ Requirements:
 - Enough space
 
 ### Useage:
-./isoMirror /path/to/iso(s) /path/to/target/dir
+./mk_mirror /path/to/iso(s) /path/to/target/dir
+   or
+./mk_mirror -r /path/to/existing/repo
 
 ### Other Considerations
 - The newer version of APT in Debian 9.x is more aggressive in ensuring repos
