@@ -16,15 +16,13 @@ import time
 
 # give me an id!!! (or not)
 # gpg --fingerprint; last 8 chars
-gpg_key_id = ''
+gpg_key_id = '26658E4B'
 
 
 def getInput():
     numArgs = len(sys.argv)
     target = ''
     images = ''
-    inPath = ''
-    releasePath = ''
     
     if gpg_key_id == '':
         print("> You must first populate 'gpg_key_id' variable with a value")
@@ -40,22 +38,26 @@ def getInput():
             # no images, so we need to figure out the path to the Release file
             target = sys.argv[-1]
 
-            def findR(target_r, inPath_r, releasePath_r):
-                for entry in os.scandir(target_r):
-                    if entry.name == 'Release.gpg':
-                        mObj = re.search(r'(/[^/]+/[^/]+/dists)(/.*)/Release', entry.path)
-                        inPath_r = mObj.group(1)
-                        releasePath_r = mObj.group(2)
-                        return inPath_r, releasePath_r
-                    elif entry.is_dir() and not entry.is_symlink():
-                        inPath_r, releasePath_r = findR(entry.path, inPath_r, releasePath_r)
+            def findR(target):
+                iP = ""
+                rP = ""
+                for entry in os.scandir(target):
+                    if entry.name == "Release.gpg" and re.match(r'.*/dists/[^/]*stable[^/]*/.*', entry.path):
+               #         if re.match(r'.*/dists/[^/]*stable[^/]*/.*', entry.path):
+                            mObj = re.search(r'(/[^/]+/[^/]+/dists)(/.*)/Release', entry.path)
+                            iP = mObj.group(1)
+                            rP = mObj.group(2)
+                            return iP, rP
+               #         else:
+               #             continue
+                    elif entry.is_dir():
+                        iP, rP = findR(entry.path)
+                        
+                print("ip rp: ", iP, rP)
+                return iP, rP
 
-            inPath, releasePath = findR(target, inPath, releasePath)
-
-            print("target", target)
-            print("inPath", inPath)
-            print("releasePath", releasePath)
-
+            inPath, releasePath = findR(target)
+            print("for real: ", inPath, releasePath)
             return target, None, inPath, releasePath
         else:
             target = sys.argv[-1]
@@ -247,6 +249,7 @@ def calcSums(parentDir, algo, fh):
                     fHash = hashlib.sha512(buf)
 
                 fSize = os.path.getsize(entry.path)
+                print("entry.path: ", entry.path)
                 mObj = re.search(r'\/stable\/(.*)', entry.path)
                 path = mObj.group(1)
                 
