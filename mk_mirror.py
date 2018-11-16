@@ -34,12 +34,14 @@ def getInput():
         scriptName = os.path.basename(__file__)
         print("Usage:")
         print("    ", scriptName, "[ iso(s) ]", "[ mirror dir ]")
-        print("    ", scriptName, "-r ", "[ mirror dir ]",)
+        print("    ", scriptName, "-r ", "[ sub-version ]", "[ mirror dir ]",)
         sys.exit()
+
     else:
         if sys.argv[1] == '-r':
             # no images, so we need to figure out the path to the Release file
             target = sys.argv[-1]
+            version = sys.argv[-2]
             inPath = ""
             releasePath = ""
 
@@ -52,21 +54,22 @@ def getInput():
                 nonlocal releasePath
                 for entry in os.scandir(target):
                     if entry.name == "Release.gpg":
-                        if re.match(r'.*/dists/[^/]*stable[^/]*/.*', entry.path):
+                        if re.match(r'.*' + re.escape(version) + r'/dists/[^/]*stable[^/]*/.*', entry.path):
                             mObj = re.search(r'(/[^/]+/[^/]+/dists)(/.*)/Release', entry.path)
                             inPath = mObj.group(1)
                             releasePath = mObj.group(2)
                     elif entry.is_dir():
                         findR(entry.path)
-                        
+ 
 
             findR(target)
-            return target, None, inPath, releasePath
+            return target, None, inPath, releasePath, version
+
         else:
             target = sys.argv[-1]
             images = sys.argv[1:numArgs-1]
 
-            return target, images, None, None
+            return target, images, None, None, None
 
 
 ## generates random mount dirs in /tmp for ISOs and mounts them
@@ -112,13 +115,16 @@ def getDebianVersion(mountDirs):
 
 
 # disables "Acquire-By-Hash" feature and updates the datetime stamp
-def fixReleaseHeader(filePath):
+def fixReleaseHeader(filePath, suite):
     patternHash = 'Acquire-By-Hash: yes'
     newStrHash = 'Acquire-By-Hash: no'
     replaceDate = time.strftime("Date: %a, %d %b %Y %H:%M:%S UTC", time.localtime())
-    replaceSuite = 'stable'
+    replaceValid = time.strftime("Valid-Until: %a, %d %b %Y %H:%M:%S UTC", time.localtime(time.time() + 20000000.0))
+    replaceSuite = suite
     regexDate = re.compile('^Date:\s(.*)$')
     
+    print("replaceValid: ", replaceValid)
+
     #Create temp file
     fh, abs_path = tempfile.mkstemp()
     with os.fdopen(fh, 'w') as new_file:
@@ -127,6 +133,9 @@ def fixReleaseHeader(filePath):
                 if re.match('^Date\:\s', line.rstrip()):
                     newDate = re.sub(r'^(Date:\s).*$', replaceDate, line, 1)
                     new_file.write(newDate)
+                elif re.match('^Valid-Until\:\s', line.rstrip()):
+                    newValid = re.sub(r'^Valid-Until\:\s(.*)', replaceValid, line, 1)
+                    new_file.write(newValid)
                 elif re.match('^Suite\:\soldstable', line.rstrip()):
                     newSuite = re.sub(r'^(Suite:\s).*$', replaceSuite, line, 1)
                     new_file.write(newSuite)
@@ -199,7 +208,7 @@ def walkDists(srcDists, dstDists, suite):
                 os.chmod(curTargetPath, 0o644)
                 
                 if os.path.basename(curTargetPath) == 'Release':
-                    fixReleaseHeader(curTargetPath)
+                    fixReleaseHeader(curTargetPath, 'stable')
 
         elif entry.is_symlink():
             linkto = os.readlink(entry.path)
@@ -262,10 +271,13 @@ def calcSums(parentDir, algo, fh):
                 fh.write(line)
 
 
-def calcRelease(distsPath, inPath, releasePath):
+def calcRelease(distsPath, inPath, releasePath, version):
     print("> Calculating Release file")
     fPath = ''.join([distsPath, releasePath, '/Release'])
     newPath = ''.join([distsPath, releasePath, '/Release.tmp'])
+
+    fixReleaseHeader(fPath, releasePath)
+
     rel_fh = open(fPath, 'r')
     new_fh = open(newPath, 'w')
     
@@ -310,15 +322,21 @@ def calcRelease(distsPath, inPath, releasePath):
     # Replace old Release file
     os.replace(newPath, fPath)
     
-    # Make Release.gpg
+    # Make Release.gpg and InRelease, and remove old copies if they exist
     gpgPath = ''.join([distsPath, releasePath, '/Release.gpg'])
     inReleasePath = ''.join([distsPath, releasePath, '/InRelease'])
+    if os.path.exists(gpgPath):
+        os.remove(gpgPath)
+    if os.path.exists(inReleasePath):
+        os.remove(inReleasePath)
     subprocess.run(["gpg", "--armor", "--output", gpgPath, "--detach-sign", fPath])
     subprocess.run(["gpg", "--clearsign", "--output", inReleasePath, fPath])
     print("> Completed Release.gpg, InRelease")
     
     # Make KEY.gpg
     keyPath = ''.join([distsPath, releasePath, '/KEY.gpg'])
+    if os.path.exists(keyPath):
+        os.remove(keyPath)
     keyId = gpg_key_id
     subprocess.run(["gpg", "--output", keyPath, "--armor", "--export", keyId])
 
@@ -348,9 +366,9 @@ def cleanup(mountDirs):
 
 
 def main():
-    targetDir, images, inPath, releasePath = getInput()
+    targetDir, images, inPath, releasePath, version = getInput()
     if images == None:
-        calcRelease(''.join([targetDir, inPath]), inPath, releasePath)
+        calcRelease(''.join([targetDir, inPath]), inPath, releasePath, version)
         sys.exit()
     else:
         mountDirs = mount(images)
